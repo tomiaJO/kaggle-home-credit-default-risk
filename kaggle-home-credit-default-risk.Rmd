@@ -1,0 +1,94 @@
+---
+title: "Untitled"
+author: "Tamas Koncz"
+date: "June 21, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+```
+
+
+Reading in files:
+```{r}
+folder_path <- "C:/Users/tkonc/Documents/Data/Kaggle/"
+
+application_train <- fread(paste(folder_path, "application_train.csv", sep = ""))
+
+```
+
+Unbalanced data, as only ~8.1% of all loans defaulted.
+
+```{r}
+application_train %>%
+  count(TARGET, sort = T) %>%
+  mutate(ratio = n / sum(n))
+```
+
+Removing ID as AMT_INCOME_TOTAL looks bogus:
+```{r}
+application_train <- application_train[SK_ID_CURR != 114967, ]
+```
+
+Helper functions for data transformations:
+```{r}
+f_dist_check <- function(df, x_str) {
+  #plots x_str column of df data.frame on a histogram, and also the same for its log-transformed version
+  p1 <- ggplot(data = df, aes_string(x = x_str)) + 
+          geom_histogram() +
+          labs(title = "Normal")
+  
+  p2 <- ggplot(data = df, aes_string(x = x_str)) +
+          geom_histogram() +
+          scale_y_log10() + 
+          labs(title = "Log")
+
+  grid.arrange(p1, p2, ncol = 2)
+}
+
+
+f_rng_0_1 <- function(x, apply_log) {
+  #transforms a numeric x vector into the 0 - 1 range
+  if(apply_log) {x <- log(x)}
+  
+  max_field <- max(x)
+  min_field <- min(x)
+  
+  x <- (x - min_field) / (max_field - min_field)
+  
+  return(x)
+}
+```
+
+
+Transformation of numeric fields into the 0-1 range (needed for DL algos to be effective):
+```{r}
+f_dist_check(df = application_train, x_str = "AMT_INCOME_TOTAL")
+f_dist_check(df = application_train, x_str = "AMT_CREDIT")
+f_dist_check(df = application_train, x_str = "AMT_ANNUITY")
+f_dist_check(df = application_train, x_str = "AMT_GOODS_PRICE")
+
+application_train <- application_train %>%
+                       mutate(AMT_INCOME_TOTAL = f_rng_0_1(x = AMT_INCOME_TOTAL, apply_log = T),
+                              AMT_CREDIT = f_rng_0_1(x = AMT_CREDIT, apply_log = F),
+                              AMT_ANNUITY = f_rng_0_1(x = AMT_ANNUITY, apply_log = F),
+                              AMT_GOODS_PRICE = f_rng_0_1(x = AMT_GOODS_PRICE, apply_log = F))
+
+##sth doesnot look right if reploting after transformations...
+```
+
+
+
+
+***END***
+
+```{r}
+sessionInfo()
+```
+
