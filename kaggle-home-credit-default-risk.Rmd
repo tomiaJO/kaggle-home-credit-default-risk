@@ -120,11 +120,22 @@ application_train <- application_train %>%
 ```
 
 
+```{r}
+f_dist_check(df = application_train, x_str = "CNT_CHILDREN")
+f_dist_check(df = application_train, x_str = "CNT_FAM_MEMBERS")
+
+application_train <- application_train %>%
+                       mutate(CNT_CHILDREN    = f_rng_0_1(x = CNT_CHILDREN,    apply_log = F),
+                              CNT_FAM_MEMBERS = f_rng_0_1(x = CNT_FAM_MEMBERS, apply_log = F))
+```
+
+
 For now keep just the pre-cleaned variables:
 ```{r}
 application_train_num <- application_train %>%
                           select(SK_ID_CURR, TARGET, AMT_INCOME_TOTAL, AMT_CREDIT, AMT_ANNUITY, AMT_GOODS_PRICE,
-                                                     DAYS_BIRTH, DAYS_EMPLOYED,	DAYS_REGISTRATION, DAYS_ID_PUBLISH)
+                                                     DAYS_BIRTH, DAYS_EMPLOYED,	DAYS_REGISTRATION, DAYS_ID_PUBLISH,
+                                                     CNT_CHILDREN, CNT_FAM_MEMBERS)
 ```
 
 
@@ -135,14 +146,30 @@ sapply(application_train_num, function(x) sum(is.na(x)))
 
 For now, let's just substitute with zero-s:
 ```{r}
+f_replace_num_NA <- function(x) {
+  fixed <- ifelse(is.na(x) | x == "" | x == "XNA", 0, x)
+  return(fixed)
+}
+```
+
+
+```{r}
 application_train_num <- application_train_num %>%
-                          mutate(AMT_ANNUITY     = ifelse(is.na(AMT_ANNUITY), 0, AMT_ANNUITY),
-                                 AMT_GOODS_PRICE = ifelse(is.na(AMT_GOODS_PRICE), 0, AMT_GOODS_PRICE))
+                          mutate(AMT_INCOME_TOTAL  = f_replace_num_NA(AMT_INCOME_TOTAL), 
+                                 AMT_CREDIT        = f_replace_num_NA(AMT_CREDIT), 
+                                 AMT_ANNUITY       = f_replace_num_NA(AMT_ANNUITY), 
+                                 AMT_GOODS_PRICE   = f_replace_num_NA(AMT_GOODS_PRICE),
+                                 DAYS_BIRTH        = f_replace_num_NA(DAYS_BIRTH), 
+                                 DAYS_EMPLOYED     = f_replace_num_NA(DAYS_EMPLOYED),	
+                                 DAYS_REGISTRATION = f_replace_num_NA(DAYS_REGISTRATION), 
+                                 DAYS_ID_PUBLISH   = f_replace_num_NA(DAYS_ID_PUBLISH), 
+                                 CNT_CHILDREN      = f_replace_num_NA(CNT_CHILDREN), 
+                                 CNT_FAM_MEMBERS   = f_replace_num_NA(CNT_FAM_MEMBERS))
 ```
 
 
 The autoencoder approach assumes that troubled loans will have a different distribution in their variables from non-troubled ones. Let's check with a simple visualization using density plots:
-```{r, fig.width = 12}
+```{r, fig.width = 12, fig.height=15}
 # application_train %>%
 #   tidyr::gather(key = "Variable", value = "Value", -TARGET, factor_key = T) %>%
 #   ggplot(aes(y = as.factor(Variable), 
@@ -156,7 +183,7 @@ application_train_num %>%
   tidyr::gather(key = "Variable", value = "Value", -TARGET, factor_key = T) %>%
   ggplot(aes(x = Value)) +
     geom_density(aes(fill = as.factor(TARGET)), alpha = .25) +
-    facet_grid(Variable~.) +
+    facet_grid(Variable~., scales = "free_y") +
     theme_minimal()
 ```
 
@@ -167,7 +194,7 @@ To make categorical variables consumable to deep learning models, we'll need to 
 First, a small function that will help us replace NAs with a dummy value:
 ```{r}
 f_replace_NA <- function(x, s) {
-  fixed <- ifelse(is.na(x) | x == "", paste("Missing", s), x)
+  fixed <- ifelse(is.na(x) | x == "" | x == "XNA", paste("Missing", s), x)
   fixed <- as.factor(fixed)
   return(fixed)
 }
@@ -183,7 +210,8 @@ Then the transformation:
 application_train_cat <- application_train %>%
                           select(SK_ID_CURR, TARGET, NAME_TYPE_SUITE, NAME_INCOME_TYPE, NAME_EDUCATION_TYPE, 
                                                      NAME_FAMILY_STATUS, NAME_HOUSING_TYPE, OCCUPATION_TYPE, 
-                                                     ORGANIZATION_TYPE, HOUSETYPE_MODE, WALLSMATERIAL_MODE) %>%
+                                                     ORGANIZATION_TYPE, HOUSETYPE_MODE, WALLSMATERIAL_MODE,
+                                                     NAME_CONTRACT_TYPE, CODE_GENDER) %>%
                           mutate(NAME_TYPE_SUITE     = f_replace_NA(NAME_TYPE_SUITE,     "1"),
                                  NAME_INCOME_TYPE    = f_replace_NA(NAME_INCOME_TYPE,    "2"),
                                  NAME_EDUCATION_TYPE = f_replace_NA(NAME_EDUCATION_TYPE, "3"),
@@ -192,21 +220,107 @@ application_train_cat <- application_train %>%
                                  OCCUPATION_TYPE     = f_replace_NA(OCCUPATION_TYPE,     "6"),
                                  ORGANIZATION_TYPE   = f_replace_NA(ORGANIZATION_TYPE,   "7"),
                                  HOUSETYPE_MODE      = f_replace_NA(HOUSETYPE_MODE,      "8"),
-                                 WALLSMATERIAL_MODE  = f_replace_NA(WALLSMATERIAL_MODE,  "9")) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = NAME_TYPE_SUITE,  value    = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = NAME_INCOME_TYPE, value    = i, fill = 0) %>%
+                                 WALLSMATERIAL_MODE  = f_replace_NA(WALLSMATERIAL_MODE,  "9"),
+                                 NAME_CONTRACT_TYPE  = f_replace_NA(NAME_CONTRACT_TYPE,  "10"),
+                                 CODE_GENDER         = f_replace_NA(CODE_GENDER,         "11")) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_TYPE_SUITE,     value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_INCOME_TYPE,    value = i, fill = 0) %>%
                           mutate(i = 1) %>% tidyr::spread(key = NAME_EDUCATION_TYPE, value = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = NAME_FAMILY_STATUS, value  = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = NAME_HOUSING_TYPE, value   = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = OCCUPATION_TYPE, value     = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = ORGANIZATION_TYPE, value   = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = HOUSETYPE_MODE, value      = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = WALLSMATERIAL_MODE, value  = i, fill = 0)
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_FAMILY_STATUS,  value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_HOUSING_TYPE,   value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = OCCUPATION_TYPE,     value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = ORGANIZATION_TYPE,   value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = HOUSETYPE_MODE,      value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = WALLSMATERIAL_MODE,  value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_CONTRACT_TYPE,  value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = CODE_GENDER,         value = i, fill = 0)
 ```
+
+##TODO!
+REGION_RATING_CLIENT
+REGION_RATING_CLIENT_W_CITY
+REGION_POPULATION_RELATIVE
+
+```{r}
+
+```
+
+
+### Flags  
+  
+No NAs:  
+```{r}
+sapply(application_train %>%
+        select(FLAG_OWN_CAR,
+               FLAG_OWN_REALTY,
+               FLAG_MOBIL,
+               FLAG_EMP_PHONE,
+               FLAG_WORK_PHONE,
+               FLAG_CONT_MOBILE,
+               FLAG_PHONE,
+               FLAG_EMAIL,
+               FLAG_DOCUMENT_2,
+               FLAG_DOCUMENT_3,
+               FLAG_DOCUMENT_4,
+               FLAG_DOCUMENT_5,
+               FLAG_DOCUMENT_6,
+               FLAG_DOCUMENT_7,
+               FLAG_DOCUMENT_8,
+               FLAG_DOCUMENT_9,
+               FLAG_DOCUMENT_10,
+               FLAG_DOCUMENT_11,
+               FLAG_DOCUMENT_12,
+               FLAG_DOCUMENT_13,
+               FLAG_DOCUMENT_14,
+               FLAG_DOCUMENT_15,
+               FLAG_DOCUMENT_16,
+               FLAG_DOCUMENT_17,
+               FLAG_DOCUMENT_18,
+               FLAG_DOCUMENT_19,
+               FLAG_DOCUMENT_20,
+               FLAG_DOCUMENT_21)
+, function(x) sum(is.na(x)))
+```
+```{r}
+application_train_flag <- application_train %>%
+                            mutate(FLAG_OWN_CAR    = ifelse(FLAG_OWN_CAR == 'Y', 1, 0),
+                                   FLAG_OWN_REALTY = ifelse(FLAG_OWN_REALTY == 'Y', 1, 0)) %>%
+                            select(SK_ID_CURR, TARGET,
+                                   FLAG_OWN_CAR,
+                                   FLAG_OWN_REALTY,
+                                   FLAG_MOBIL,
+                                   FLAG_EMP_PHONE,
+                                   FLAG_WORK_PHONE,
+                                   FLAG_CONT_MOBILE,
+                                   FLAG_PHONE,
+                                   FLAG_EMAIL,
+                                   FLAG_DOCUMENT_2,
+                                   FLAG_DOCUMENT_3,
+                                   FLAG_DOCUMENT_4,
+                                   FLAG_DOCUMENT_5,
+                                   FLAG_DOCUMENT_6,
+                                   FLAG_DOCUMENT_7,
+                                   FLAG_DOCUMENT_8,
+                                   FLAG_DOCUMENT_9,
+                                   FLAG_DOCUMENT_10,
+                                   FLAG_DOCUMENT_11,
+                                   FLAG_DOCUMENT_12,
+                                   FLAG_DOCUMENT_13,
+                                   FLAG_DOCUMENT_14,
+                                   FLAG_DOCUMENT_15,
+                                   FLAG_DOCUMENT_16,
+                                   FLAG_DOCUMENT_17,
+                                   FLAG_DOCUMENT_18,
+                                   FLAG_DOCUMENT_19,
+                                   FLAG_DOCUMENT_20,
+                                   FLAG_DOCUMENT_21)
+```
+
 
 ```{r}
 application_train <- application_train_num %>% 
-                       full_join(application_train_cat, by = c("SK_ID_CURR", "TARGET"))
+                       full_join(application_train_cat,  by = c("SK_ID_CURR", "TARGET")) %>%
+                       full_join(application_train_flag, by = c("SK_ID_CURR", "TARGET"))
 ```
 
 
@@ -239,13 +353,77 @@ id_train <- df_train$SK_ID_CURR
 id_test  <- df_train$SK_ID_CURR 
 ```
 
+#### Simple ANN approach  
+
+
+```{r}
+model_three_layer_mlp <- keras_model_sequential()
+
+model_three_layer_mlp %>% 
+  # First hidden layer
+  layer_dense(units = 32, kernel_initializer = "random_uniform", activation = "relu", input_shape = ncol(x_train)) %>% 
+  # Dropout to prevent overfitting
+  layer_dropout(rate = 0.2) %>%
+  # Second hidden layer
+  layer_dense(units = 64, kernel_initializer = "random_uniform", activation = "relu") %>% 
+  # Dropout to prevent overfitting
+  layer_dropout(rate = 0.2) %>%
+  # Third hidden layer
+  layer_dense(units = 64, kernel_initializer = "random_uniform", activation = "relu") %>% 
+  # Dropout to prevent overfitting
+  layer_dropout(rate = 0.2) %>%
+  # Output layer
+  layer_dense(units = 1, kernel_initializer = "random_uniform", activation = "sigmoid") %>% 
+  # Compile ANN
+  compile(
+    optimizer = 'adam',
+    loss      = 'binary_crossentropy',
+    metrics   = c('accuracy'))
+
+model_three_layer_mlp
+```
+```{r}
+checkpoint <- callback_model_checkpoint(
+                filepath = "model_three_layer_mlp.hdf5", 
+                save_best_only = TRUE, 
+                period = 1,
+                verbose = 1)
+
+early_stopping <- callback_early_stopping(patience = 10)
+
+model_three_layer_mlp %>% 
+  fit(x                = x_train, 
+      y                = y_train,
+      batch_size       = 128,
+      epochs           = 50,
+      validation_split = 0.25,
+      callbacks        = list(checkpoint, early_stopping))
+```
+
+
+```{r}
+loss <- evaluate(model_three_layer_mlp, x = x_test, y = y_test)
+loss
+```
+
+
+```{r}
+pred_test <- predict(model_three_layer_mlp, x_test)
+auc(y_test, pred_test)
+```
+
+
+#### Autoencoder  
+
 
 ```{r}
 model <- keras_model_sequential()
 model %>%
-  layer_dense(units = 12, activation = "tanh", input_shape = ncol(x_train)) %>%
-  layer_dense(units = 6, activation = "tanh", regularizer_l1_l2(l1 = 0.01, l2 = 0.01)) %>%
-  layer_dense(units = 12, activation = "tanh") %>%
+  layer_dense(units = 15, activation = "tanh", input_shape = ncol(x_train)) %>%
+  layer_dense(units = 10, activation = "tanh", regularizer_l1_l2(l1 = 0.01, l2 = 0.01)) %>%
+  layer_dense(units = 5, activation = "tanh",  regularizer_l1_l2(l1 = 0.01, l2 = 0.01)) %>%
+  layer_dense(units = 10, activation = "tanh") %>%
+  layer_dense(units = 15, activation = "tanh") %>%
   layer_dense(units = ncol(x_train))
 
 summary(model)
@@ -272,7 +450,7 @@ model %>% fit(
             y = x_train[y_train == 0, ], 
             epochs = 50, 
             batch_size = 32,
-            validation_data = list(x_test[y_test == 0, ], x_test[y_test == 0, ]), 
+            validation_split = 0.25, 
             callbacks = list(checkpoint, early_stopping))
 ```
 
@@ -291,23 +469,20 @@ mse_test <- apply((x_test - pred_test)^2, 1, sum)
 ```
 
 ```{r}
-library(Metrics)
-auc(x_train, pred_train)
-auc(x_test, pred_test)
-
-?auc
+# auc(x_train, pred_train)
+# auc(x_test, pred_test)
 ```
 
 ```{r}
-possible_k <- seq(from = 0, to = 0.0005, length.out = 1000)
-
-precision <- sapply(possible_k, function(k) {
-  predicted_class <- as.numeric(mse_test > k)
-  sum(predicted_class == 1 & y_test == 1) / sum(predicted_class)
-})
-
-qplot(possible_k, precision, geom = "line") + 
-  labs(x = "Threshold", y = "Precision")
+# possible_k <- seq(from = 0, to = 0.0005, length.out = 1000)
+# 
+# precision <- sapply(possible_k, function(k) {
+#   predicted_class <- as.numeric(mse_test > k)
+#   sum(predicted_class == 1 & y_test == 1) / sum(predicted_class)
+# })
+# 
+# qplot(possible_k, precision, geom = "line") + 
+#   labs(x = "Threshold", y = "Precision")
 ```
 
 
