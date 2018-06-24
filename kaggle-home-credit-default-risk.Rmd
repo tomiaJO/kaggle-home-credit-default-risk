@@ -12,6 +12,11 @@ library(data.table)
 library(dplyr)
 library(ggplot2)
 library(gridExtra)
+
+library(keras)
+library(Metrics)
+
+rm(list=ls())
 ```
 
 
@@ -31,10 +36,22 @@ application_train %>%
   mutate(ratio = n / sum(n))
 ```
 
+### Data prep
+
 Removing ID as AMT_INCOME_TOTAL looks bogus:
 ```{r}
 application_train <- application_train[SK_ID_CURR != 114967, ]
 ```
+
+
+Fixing DAYS_EMPLOYED for unemployed / job changing applicants:
+```{r}
+application_train <- application_train %>%
+                      mutate(DAYS_EMPLOYED = ifelse(DAYS_EMPLOYED == 365243, 0, DAYS_EMPLOYED))
+```
+
+
+#### Numeric fields
 
 Helper functions for data transformations:
 ```{r}
@@ -57,8 +74,8 @@ f_rng_0_1 <- function(x, apply_log) {
   #transforms a numeric x vector into the 0 - 1 range
   if(apply_log) {x <- log(x)}
   
-  max_field <- max(x)
-  min_field <- min(x)
+  max_field <- max(x, na.rm = T)
+  min_field <- min(x, na.rm = T)
   
   x <- (x - min_field) / (max_field - min_field)
   
@@ -76,14 +93,272 @@ f_dist_check(df = application_train, x_str = "AMT_GOODS_PRICE")
 
 application_train <- application_train %>%
                        mutate(AMT_INCOME_TOTAL = f_rng_0_1(x = AMT_INCOME_TOTAL, apply_log = T),
-                              AMT_CREDIT = f_rng_0_1(x = AMT_CREDIT, apply_log = F),
-                              AMT_ANNUITY = f_rng_0_1(x = AMT_ANNUITY, apply_log = F),
-                              AMT_GOODS_PRICE = f_rng_0_1(x = AMT_GOODS_PRICE, apply_log = F))
-
-##sth doesnot look right if reploting after transformations...
+                              AMT_CREDIT       = f_rng_0_1(x = AMT_CREDIT,       apply_log = F),
+                              AMT_ANNUITY      = f_rng_0_1(x = AMT_ANNUITY,      apply_log = F),
+                              AMT_GOODS_PRICE  = f_rng_0_1(x = AMT_GOODS_PRICE,  apply_log = F))
 ```
 
 
+```{r}
+f_dist_check(df = application_train, x_str = "DAYS_BIRTH")
+f_dist_check(df = application_train, x_str = "DAYS_EMPLOYED")
+f_dist_check(df = application_train, x_str = "DAYS_REGISTRATION")
+f_dist_check(df = application_train, x_str = "DAYS_ID_PUBLISH")
+
+
+application_train <- application_train %>%
+                      mutate(DAYS_BIRTH        = -1 * DAYS_BIRTH,	
+                             DAYS_EMPLOYED     = -1 * DAYS_EMPLOYED,
+                             DAYS_REGISTRATION = -1 * DAYS_REGISTRATION,
+                             DAYS_ID_PUBLISH   = -1 * DAYS_ID_PUBLISH)
+
+application_train <- application_train %>%
+                       mutate(DAYS_BIRTH        = f_rng_0_1(x = DAYS_BIRTH,        apply_log = F),
+                              DAYS_EMPLOYED     = f_rng_0_1(x = DAYS_EMPLOYED,     apply_log = F),
+                              DAYS_REGISTRATION = f_rng_0_1(x = DAYS_REGISTRATION, apply_log = F),
+                              DAYS_ID_PUBLISH   = f_rng_0_1(x = DAYS_ID_PUBLISH,   apply_log = F))
+```
+
+
+For now keep just the pre-cleaned variables:
+```{r}
+application_train_num <- application_train %>%
+                          select(SK_ID_CURR, TARGET, AMT_INCOME_TOTAL, AMT_CREDIT, AMT_ANNUITY, AMT_GOODS_PRICE,
+                                                     DAYS_BIRTH, DAYS_EMPLOYED,	DAYS_REGISTRATION, DAYS_ID_PUBLISH)
+```
+
+
+Working with NAs
+```{r}
+sapply(application_train_num, function(x) sum(is.na(x)))
+```
+
+For now, let's just substitute with zero-s:
+```{r}
+application_train_num <- application_train_num %>%
+                          mutate(AMT_ANNUITY     = ifelse(is.na(AMT_ANNUITY), 0, AMT_ANNUITY),
+                                 AMT_GOODS_PRICE = ifelse(is.na(AMT_GOODS_PRICE), 0, AMT_GOODS_PRICE))
+```
+
+
+The autoencoder approach assumes that troubled loans will have a different distribution in their variables from non-troubled ones. Let's check with a simple visualization using density plots:
+```{r, fig.width = 12}
+# application_train %>%
+#   tidyr::gather(key = "Variable", value = "Value", -TARGET, factor_key = T) %>%
+#   ggplot(aes(y = as.factor(Variable), 
+#              fill = as.factor(TARGET), 
+#              x = percent_rank(Value))) +
+#   ggridges::geom_density_ridges(alpha = 0.25)
+
+
+application_train_num %>%
+  select(-SK_ID_CURR) %>%
+  tidyr::gather(key = "Variable", value = "Value", -TARGET, factor_key = T) %>%
+  ggplot(aes(x = Value)) +
+    geom_density(aes(fill = as.factor(TARGET)), alpha = .25) +
+    facet_grid(Variable~.) +
+    theme_minimal()
+```
+
+
+#### Categoricals  
+  
+To make categorical variables consumable to deep learning models, we'll need to one-hot encode them.  
+First, a small function that will help us replace NAs with a dummy value:
+```{r}
+f_replace_NA <- function(x, s) {
+  fixed <- ifelse(is.na(x) | x == "", paste("Missing", s), x)
+  fixed <- as.factor(fixed)
+  return(fixed)
+}
+```
+
+
+Then the transformation:
+```{r}
+# application_train %>%
+#   mutate(WALLSMATERIAL_MODE = f_replace_NA(WALLSMATERIAL_MODE)) %>%
+#   count(WALLSMATERIAL_MODE, sort = T)
+
+application_train_cat <- application_train %>%
+                          select(SK_ID_CURR, TARGET, NAME_TYPE_SUITE, NAME_INCOME_TYPE, NAME_EDUCATION_TYPE, 
+                                                     NAME_FAMILY_STATUS, NAME_HOUSING_TYPE, OCCUPATION_TYPE, 
+                                                     ORGANIZATION_TYPE, HOUSETYPE_MODE, WALLSMATERIAL_MODE) %>%
+                          mutate(NAME_TYPE_SUITE     = f_replace_NA(NAME_TYPE_SUITE,     "1"),
+                                 NAME_INCOME_TYPE    = f_replace_NA(NAME_INCOME_TYPE,    "2"),
+                                 NAME_EDUCATION_TYPE = f_replace_NA(NAME_EDUCATION_TYPE, "3"),
+                                 NAME_FAMILY_STATUS  = f_replace_NA(NAME_FAMILY_STATUS,  "4"),
+                                 NAME_HOUSING_TYPE   = f_replace_NA(NAME_HOUSING_TYPE,   "5"),
+                                 OCCUPATION_TYPE     = f_replace_NA(OCCUPATION_TYPE,     "6"),
+                                 ORGANIZATION_TYPE   = f_replace_NA(ORGANIZATION_TYPE,   "7"),
+                                 HOUSETYPE_MODE      = f_replace_NA(HOUSETYPE_MODE,      "8"),
+                                 WALLSMATERIAL_MODE  = f_replace_NA(WALLSMATERIAL_MODE,  "9")) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_TYPE_SUITE,  value    = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_INCOME_TYPE, value    = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_EDUCATION_TYPE, value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_FAMILY_STATUS, value  = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_HOUSING_TYPE, value   = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = OCCUPATION_TYPE, value     = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = ORGANIZATION_TYPE, value   = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = HOUSETYPE_MODE, value      = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = WALLSMATERIAL_MODE, value  = i, fill = 0)
+```
+
+```{r}
+application_train <- application_train_num %>% 
+                       full_join(application_train_cat, by = c("SK_ID_CURR", "TARGET"))
+```
+
+
+### Modeling
+
+Creat training and test sets:
+```{r}
+n <- application_train %>% nrow()
+sample_size <- as.integer(n * 0.8) 
+
+set.seed(93)
+train_index <- sample(1:n, size = sample_size)
+
+df_train <- application_train[train_index, ]
+df_test  <- application_train[-train_index, ]
+
+
+x_train <- df_train %>%
+            select(-TARGET, -SK_ID_CURR) %>%
+            as.matrix()
+
+x_test  <- df_test %>%
+            select(-TARGET, -SK_ID_CURR) %>%
+            as.matrix()
+
+y_train <- df_train$TARGET
+y_test  <- df_test$TARGET
+
+id_train <- df_train$SK_ID_CURR
+id_test  <- df_train$SK_ID_CURR 
+```
+
+
+```{r}
+model <- keras_model_sequential()
+model %>%
+  layer_dense(units = 12, activation = "tanh", input_shape = ncol(x_train)) %>%
+  layer_dense(units = 6, activation = "tanh", regularizer_l1_l2(l1 = 0.01, l2 = 0.01)) %>%
+  layer_dense(units = 12, activation = "tanh") %>%
+  layer_dense(units = ncol(x_train))
+
+summary(model)
+```
+
+```{r}
+model %>% compile(
+            loss = "mean_squared_error", 
+            optimizer = "adam")
+```
+
+
+```{r}
+checkpoint <- callback_model_checkpoint(
+                filepath = "model.hdf5", 
+                save_best_only = TRUE, 
+                period = 1,
+                verbose = 1)
+
+early_stopping <- callback_early_stopping(patience = 5)
+
+model %>% fit(
+            x = x_train[y_train == 0, ], 
+            y = x_train[y_train == 0, ], 
+            epochs = 50, 
+            batch_size = 32,
+            validation_data = list(x_test[y_test == 0, ], x_test[y_test == 0, ]), 
+            callbacks = list(checkpoint, early_stopping))
+```
+
+```{r}
+loss <- evaluate(model, x = x_test[y_test == 0,], y = x_test[y_test == 0,])
+loss
+```
+
+
+```{r}
+pred_train <- predict(model, x_train)
+mse_train <- apply((x_train - pred_train)^2, 1, sum)
+
+pred_test <- predict(model, x_test)
+mse_test <- apply((x_test - pred_test)^2, 1, sum)
+```
+
+```{r}
+library(Metrics)
+auc(x_train, pred_train)
+auc(x_test, pred_test)
+
+?auc
+```
+
+```{r}
+possible_k <- seq(from = 0, to = 0.0005, length.out = 1000)
+
+precision <- sapply(possible_k, function(k) {
+  predicted_class <- as.numeric(mse_test > k)
+  sum(predicted_class == 1 & y_test == 1) / sum(predicted_class)
+})
+
+qplot(possible_k, precision, geom = "line") + 
+  labs(x = "Threshold", y = "Precision")
+```
+
+
+```{r, fig.width=10, fig.height=4}
+k <- quantile(mse_train, 0.95)
+
+data.frame(mse_train) %>% 
+  cbind(y_train) %>%
+  group_by(y_train) %>%
+  summarize(n = n(),
+            mean_mse = mean(mse_train),
+            min_mse = min(mse_train),
+            max_mse = max(mse_train),
+            median_mse = median(mse_train))
+
+data.frame(mse_train) %>% 
+  cbind(y_train) %>%
+  mutate(pred_y = as.numeric(mse_train > k)) %>% 
+  ggplot(aes(x = mse_train, fill = as.factor(y_train))) +
+    geom_density(alpha = 0.15) +
+    facet_grid(~as.factor(y_train))
+
+data.frame(mse_train) %>% 
+  cbind(y_train) %>%
+  mutate(pred_y = as.numeric(mse_train > k)) %>% 
+  group_by(y_train, pred_y) %>%
+  summarize(n = n(),
+            mean_mse = mean(mse_train))
+```
+
+```{r}
+possible_k <- seq(min(mse_train), max(mse_train), by = (max(mse_train) - min(mse_train)) / 500)
+
+auc_list_train <- vector(mode = "list", length = 500)
+
+i = 1
+for(k in possible_k) {
+  y_train_pred <- as.numeric(mse_train > k)
+  auc_list_train[i] <- auc(y_train, y_train_pred)
+  i=i+1
+}
+
+
+auc_list_train <- cbind(k = possible_k, do.call(rbind, auc_list_train)) %>%
+                    as.data.frame() %>%
+                    rename("auc" = "V2")
+
+auc_list_train %>%
+  ggplot(aes(x = k, y = auc)) +
+  geom_line()
+```
 
 
 ***END***
