@@ -104,19 +104,22 @@ f_dist_check(df = application_train, x_str = "DAYS_BIRTH")
 f_dist_check(df = application_train, x_str = "DAYS_EMPLOYED")
 f_dist_check(df = application_train, x_str = "DAYS_REGISTRATION")
 f_dist_check(df = application_train, x_str = "DAYS_ID_PUBLISH")
+f_dist_check(df = application_train, x_str = "DAYS_LAST_PHONE_CHANGE")
 
 
 application_train <- application_train %>%
-                      mutate(DAYS_BIRTH        = -1 * DAYS_BIRTH,	
-                             DAYS_EMPLOYED     = -1 * DAYS_EMPLOYED,
-                             DAYS_REGISTRATION = -1 * DAYS_REGISTRATION,
-                             DAYS_ID_PUBLISH   = -1 * DAYS_ID_PUBLISH)
+                      mutate(DAYS_BIRTH             = -1 * DAYS_BIRTH,	
+                             DAYS_EMPLOYED          = -1 * DAYS_EMPLOYED,
+                             DAYS_REGISTRATION      = -1 * DAYS_REGISTRATION,
+                             DAYS_ID_PUBLISH        = -1 * DAYS_ID_PUBLISH,
+                             DAYS_LAST_PHONE_CHANGE = -1 * DAYS_LAST_PHONE_CHANGE)
 
 application_train <- application_train %>%
-                       mutate(DAYS_BIRTH        = f_rng_0_1(x = DAYS_BIRTH,        apply_log = F),
-                              DAYS_EMPLOYED     = f_rng_0_1(x = DAYS_EMPLOYED,     apply_log = F),
-                              DAYS_REGISTRATION = f_rng_0_1(x = DAYS_REGISTRATION, apply_log = F),
-                              DAYS_ID_PUBLISH   = f_rng_0_1(x = DAYS_ID_PUBLISH,   apply_log = F))
+                       mutate(DAYS_BIRTH             = f_rng_0_1(x = DAYS_BIRTH,             apply_log = F),
+                              DAYS_EMPLOYED          = f_rng_0_1(x = DAYS_EMPLOYED,          apply_log = F),
+                              DAYS_REGISTRATION      = f_rng_0_1(x = DAYS_REGISTRATION,      apply_log = F),
+                              DAYS_ID_PUBLISH        = f_rng_0_1(x = DAYS_ID_PUBLISH,        apply_log = F),
+                              DAYS_LAST_PHONE_CHANGE = f_rng_0_1(x = DAYS_LAST_PHONE_CHANGE, apply_log = F))
 ```
 
 
@@ -130,12 +133,22 @@ application_train <- application_train %>%
 ```
 
 
+```{r}
+f_dist_check(df = application_train, x_str = "REGION_POPULATION_RELATIVE")
+
+application_train <- application_train %>%
+                       mutate(REGION_POPULATION_RELATIVE = f_rng_0_1(x = REGION_POPULATION_RELATIVE, apply_log = F))
+```
+
+
 For now keep just the pre-cleaned variables:
 ```{r}
 application_train_num <- application_train %>%
                           select(SK_ID_CURR, TARGET, AMT_INCOME_TOTAL, AMT_CREDIT, AMT_ANNUITY, AMT_GOODS_PRICE,
                                                      DAYS_BIRTH, DAYS_EMPLOYED,	DAYS_REGISTRATION, DAYS_ID_PUBLISH,
-                                                     CNT_CHILDREN, CNT_FAM_MEMBERS)
+                                                     DAYS_LAST_PHONE_CHANGE, REGION_POPULATION_RELATIVE,
+                                                     CNT_CHILDREN, CNT_FAM_MEMBERS
+                                                     )
 ```
 
 
@@ -211,38 +224,36 @@ application_train_cat <- application_train %>%
                           select(SK_ID_CURR, TARGET, NAME_TYPE_SUITE, NAME_INCOME_TYPE, NAME_EDUCATION_TYPE, 
                                                      NAME_FAMILY_STATUS, NAME_HOUSING_TYPE, OCCUPATION_TYPE, 
                                                      ORGANIZATION_TYPE, HOUSETYPE_MODE, WALLSMATERIAL_MODE,
-                                                     NAME_CONTRACT_TYPE, CODE_GENDER) %>%
-                          mutate(NAME_TYPE_SUITE     = f_replace_NA(NAME_TYPE_SUITE,     "1"),
-                                 NAME_INCOME_TYPE    = f_replace_NA(NAME_INCOME_TYPE,    "2"),
-                                 NAME_EDUCATION_TYPE = f_replace_NA(NAME_EDUCATION_TYPE, "3"),
-                                 NAME_FAMILY_STATUS  = f_replace_NA(NAME_FAMILY_STATUS,  "4"),
-                                 NAME_HOUSING_TYPE   = f_replace_NA(NAME_HOUSING_TYPE,   "5"),
-                                 OCCUPATION_TYPE     = f_replace_NA(OCCUPATION_TYPE,     "6"),
-                                 ORGANIZATION_TYPE   = f_replace_NA(ORGANIZATION_TYPE,   "7"),
-                                 HOUSETYPE_MODE      = f_replace_NA(HOUSETYPE_MODE,      "8"),
-                                 WALLSMATERIAL_MODE  = f_replace_NA(WALLSMATERIAL_MODE,  "9"),
-                                 NAME_CONTRACT_TYPE  = f_replace_NA(NAME_CONTRACT_TYPE,  "10"),
-                                 CODE_GENDER         = f_replace_NA(CODE_GENDER,         "11")) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = NAME_TYPE_SUITE,     value = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = NAME_INCOME_TYPE,    value = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = NAME_EDUCATION_TYPE, value = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = NAME_FAMILY_STATUS,  value = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = NAME_HOUSING_TYPE,   value = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = OCCUPATION_TYPE,     value = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = ORGANIZATION_TYPE,   value = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = HOUSETYPE_MODE,      value = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = WALLSMATERIAL_MODE,  value = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = NAME_CONTRACT_TYPE,  value = i, fill = 0) %>%
-                          mutate(i = 1) %>% tidyr::spread(key = CODE_GENDER,         value = i, fill = 0)
-```
-
-##TODO!
-REGION_RATING_CLIENT
-REGION_RATING_CLIENT_W_CITY
-REGION_POPULATION_RELATIVE
-
-```{r}
-
+                                                     NAME_CONTRACT_TYPE, CODE_GENDER, 
+                                                     REGION_RATING_CLIENT, REGION_RATING_CLIENT_W_CITY) %>%
+                          mutate(REGION_RATING_CLIENT = paste("REGION_RATING_CLIENT", REGION_RATING_CLIENT, sep = "_"),
+                                 REGION_RATING_CLIENT_W_CITY = paste("REGION_RATING_CLIENT_W_CITY", REGION_RATING_CLIENT_W_CITY, sep = "_")) %>%
+                          mutate(NAME_TYPE_SUITE             = f_replace_NA(NAME_TYPE_SUITE,     "1"),
+                                 NAME_INCOME_TYPE            = f_replace_NA(NAME_INCOME_TYPE,    "2"),
+                                 NAME_EDUCATION_TYPE         = f_replace_NA(NAME_EDUCATION_TYPE, "3"),
+                                 NAME_FAMILY_STATUS          = f_replace_NA(NAME_FAMILY_STATUS,  "4"),
+                                 NAME_HOUSING_TYPE           = f_replace_NA(NAME_HOUSING_TYPE,   "5"),
+                                 OCCUPATION_TYPE             = f_replace_NA(OCCUPATION_TYPE,     "6"),
+                                 ORGANIZATION_TYPE           = f_replace_NA(ORGANIZATION_TYPE,   "7"),
+                                 HOUSETYPE_MODE              = f_replace_NA(HOUSETYPE_MODE,      "8"),
+                                 WALLSMATERIAL_MODE          = f_replace_NA(WALLSMATERIAL_MODE,  "9"),
+                                 NAME_CONTRACT_TYPE          = f_replace_NA(NAME_CONTRACT_TYPE,  "10"),
+                                 CODE_GENDER                 = f_replace_NA(CODE_GENDER,         "11"),
+                                 REGION_RATING_CLIENT        = f_replace_NA(REGION_RATING_CLIENT, "12"),
+                                 REGION_RATING_CLIENT_W_CITY = f_replace_NA(REGION_RATING_CLIENT_W_CITY, "13")) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_TYPE_SUITE,             value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_INCOME_TYPE,            value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_EDUCATION_TYPE,         value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_FAMILY_STATUS,          value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_HOUSING_TYPE,           value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = OCCUPATION_TYPE,             value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = ORGANIZATION_TYPE,           value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = HOUSETYPE_MODE,              value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = WALLSMATERIAL_MODE,          value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = NAME_CONTRACT_TYPE,          value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = CODE_GENDER,                 value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = REGION_RATING_CLIENT,        value = i, fill = 0) %>%
+                          mutate(i = 1) %>% tidyr::spread(key = REGION_RATING_CLIENT_W_CITY, value = i, fill = 0)
 ```
 
 
@@ -278,8 +289,13 @@ sapply(application_train %>%
                FLAG_DOCUMENT_18,
                FLAG_DOCUMENT_19,
                FLAG_DOCUMENT_20,
-               FLAG_DOCUMENT_21)
-, function(x) sum(is.na(x)))
+               FLAG_DOCUMENT_21,
+               REG_REGION_NOT_LIVE_REGION,
+               REG_REGION_NOT_WORK_REGION,
+               LIVE_REGION_NOT_WORK_REGION,
+               REG_CITY_NOT_LIVE_CITY,
+               REG_CITY_NOT_WORK_CITY,
+               LIVE_CITY_NOT_WORK_CITY), function(x) sum(is.na(x)))
 ```
 ```{r}
 application_train_flag <- application_train %>%
@@ -313,7 +329,13 @@ application_train_flag <- application_train %>%
                                    FLAG_DOCUMENT_18,
                                    FLAG_DOCUMENT_19,
                                    FLAG_DOCUMENT_20,
-                                   FLAG_DOCUMENT_21)
+                                   FLAG_DOCUMENT_21,
+                                   REG_REGION_NOT_LIVE_REGION,
+                                   REG_REGION_NOT_WORK_REGION,
+                                   LIVE_REGION_NOT_WORK_REGION,
+                                   REG_CITY_NOT_LIVE_CITY,
+                                   REG_CITY_NOT_WORK_CITY,
+                                   LIVE_CITY_NOT_WORK_CITY)
 ```
 
 
@@ -361,17 +383,17 @@ model_three_layer_mlp <- keras_model_sequential()
 
 model_three_layer_mlp %>% 
   # First hidden layer
-  layer_dense(units = 32, kernel_initializer = "random_uniform", activation = "relu", input_shape = ncol(x_train)) %>% 
+  layer_dense(units = 64, kernel_initializer = "random_uniform", activation = "relu", input_shape = ncol(x_train)) %>% 
   # Dropout to prevent overfitting
-  layer_dropout(rate = 0.2) %>%
+  layer_dropout(rate = 0.3) %>%
   # Second hidden layer
   layer_dense(units = 64, kernel_initializer = "random_uniform", activation = "relu") %>% 
   # Dropout to prevent overfitting
-  layer_dropout(rate = 0.2) %>%
+  layer_dropout(rate = 0.3) %>%
   # Third hidden layer
   layer_dense(units = 64, kernel_initializer = "random_uniform", activation = "relu") %>% 
   # Dropout to prevent overfitting
-  layer_dropout(rate = 0.2) %>%
+  layer_dropout(rate = 0.3) %>%
   # Output layer
   layer_dense(units = 1, kernel_initializer = "random_uniform", activation = "sigmoid") %>% 
   # Compile ANN
